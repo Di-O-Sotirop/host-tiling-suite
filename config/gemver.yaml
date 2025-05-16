@@ -1,0 +1,24 @@
+benchmark_name: gemver
+
+executable:
+  baseline: gemver_AK1_tiled_baseline.exe
+  tiled: gemver_AK1_tiled.exe
+
+source:
+  baseline: gemver_AK1_tiled_baseline.cu
+  tiled: gemver_AK1_tiled.cu
+
+make_targets:
+  baseline: gemver_AK1_tiled_baseline.exe
+  tiled: gemver_AK1_tiled.exe
+
+parameters:
+  shifts: [6, 8, 10, 12]
+  num_tiles: [1, 2, 4, 8, 16, 32]
+  repeats: 15
+  threads_per_block: 256
+  verify: true
+  debug: true 
+  measure_end2end: true
+  
+output_csv: results_gemver.csv

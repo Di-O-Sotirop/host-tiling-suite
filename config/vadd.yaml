@@ -1,0 +1,23 @@
+benchmark_name: vadd
+
+executable:
+  baseline: vec_add3_async.exe
+  tiled: vec_add3_tiled.exe
+
+source:
+  baseline: vec_add3_async.cu
+  tiled: vec_add3_tiled.cu
+
+make_targets:
+  baseline: vec_add3_async.exe
+  tiled: vec_add3_tiled.exe
+
+parameters:
+  shifts: [10, 12, 14, 16, 18, 20, 22, 24]
+  num_tiles: [1, 2, 4, 8, 16, 32]
+  repeats: 25
+  threads_per_block: 256
+  verify: false
+  debug: true 
+  measure_end2end: true
+output_csv: results_vadd.csv

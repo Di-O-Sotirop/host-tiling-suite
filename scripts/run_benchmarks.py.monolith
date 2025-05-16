@@ -1,0 +1,113 @@
+import subprocess
+import re
+import os
+import statistics
+import yaml
+import argparse
+
+# Regex patterns
+SHIFTS_PATTERN = re.compile(r'#define\s+SHIFTS\s+\d+')
+TILES_PATTERN = re.compile(r'#define\s+NUM_TILES\s+\d+')
+THREADS_PATTERN = re.compile(r'#define\s+THREADS_PER_BLOCK\s+\d+')
+EXEC_TIME_PATTERN = re.compile(r'Execution Time:\s+([\d.]+)\s*ms')
+
+def run_command(cmd, env=None, cwd=None):
+    result = subprocess.run(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+        cwd=cwd  # this is the missing piece
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"Command failed: {' '.join(cmd)}\n{result.stderr}")
+    return result.stdout
+
+
+def update_define(filepath, pattern, define_name, value):
+    updated = False
+    with open(filepath, 'r') as f:
+        lines = f.readlines()
+    with open(filepath, 'w') as f:
+        for line in lines:
+            if pattern.match(line):
+                f.write(f"#define {define_name} {value}\n")
+                updated = True
+            else:
+                f.write(line)
+    if not updated:
+        raise RuntimeError(f"#define {define_name} not found in {filepath}")
+
+def compile_target(target, cwd=None):
+    run_command(["make", "clean"], cwd=cwd)
+    run_command(["make", target], cwd=cwd)
+
+
+def run_executable(exe, repeats, verify):
+    times = []
+    env = os.environ.copy()
+    env["VERIFY"] = "1" if verify else "0"
+    for i in range(repeats):
+        output = run_command([f"./{exe}"], env=env)
+        match = EXEC_TIME_PATTERN.search(output)
+        if match:
+            times.append(float(match.group(1)))
+        else:
+            print("[WARNING] No execution time found.")
+    return statistics.mean(times), statistics.stdev(times)
+
+def main(config_path):
+    with open(config_path, 'r') as f:
+        cfg = yaml.safe_load(f)
+
+    benchmark_name = cfg["benchmark_name"]
+    benchmark_dir = os.path.join("benchmarks", benchmark_name)
+    src_dir = os.path.join(benchmark_dir, "src")
+
+    shifts_list = cfg["parameters"]["shifts"]
+    tile_list = cfg["parameters"]["num_tiles"]
+    repeats = cfg["parameters"]["repeats"]
+    verify = cfg["parameters"].get("verify", False)
+    threads_per_block = cfg["parameters"].get("threads_per_block", 256)
+
+    src_tiled = os.path.join(src_dir, cfg["source"]["tiled"])
+    exe_tiled = os.path.join(benchmark_dir, cfg["executable"]["tiled"])
+    make_target = cfg["make_targets"]["tiled"]
+
+    results = {}
+
+    for shift in shifts_list:
+        for tile in tile_list:
+            print(f"\n[TILED] SHIFTS={shift}  TILES={tile}")
+            update_define(src_tiled, SHIFTS_PATTERN, "SHIFTS", shift)
+            update_define(src_tiled, TILES_PATTERN, "NUM_TILES", tile)
+            update_define(src_tiled, THREADS_PATTERN, "THREADS_PER_BLOCK", threads_per_block)
+
+            # Run make from the benchmark directory
+            compile_target(make_target, cwd=benchmark_dir)
+
+            # Run executable from the benchmark directory
+            mean_time, std_dev = run_executable(exe_tiled, repeats, verify)
+            print(f"[Result] Avg: {mean_time:.3f} ms ± {std_dev:.3f} ms")
+            results[(shift, tile)] = (mean_time, std_dev)
+
+    # Print summary
+    print("\n=== Summary: Execution Time (ms) ===")
+    header = "SHIFTS\\TILES" + "".join([f"{t:>10}" for t in tile_list])
+    print(header)
+    print("-" * len(header))
+    for shift in shifts_list:
+        row = f"{shift:>12}"
+        for tile in tile_list:
+            t = results.get((shift, tile), None)
+            val = f"{t[0]:.2f}" if t else "N/A"
+            row += f"{val:>10}"
+        print(row)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("config", help="Path to YAML config file (e.g., config/vadd.yaml)")
+    args = parser.parse_args()
+    main(args.config)
