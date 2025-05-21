@@ -4,7 +4,7 @@
 #include <cstdlib>
 #include <chrono>
 
-#define SHIFTS 56
+#define SHIFTS 16
 #define MAX_STREAMS 1
 #define NUM_TILES 1
 #define TILE_BUFFERS 1
