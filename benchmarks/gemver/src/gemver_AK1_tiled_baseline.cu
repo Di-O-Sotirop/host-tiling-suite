@@ -4,13 +4,13 @@
 #include <cstdlib>
 #include <chrono>
 
-#define SHIFTS 12
+#define SHIFTS 20
 #define MAX_STREAMS 1
 #define NUM_TILES 1
 #define TILE_BUFFERS 1
 #define GPU_DEVICE 0
 #define PERCENT_DIFF_ERROR_THRESHOLD 0.05
-
+// #define VERIFY 1
 #define THREADS_PER_BLOCK 256
 
 
@@ -124,6 +124,7 @@ __global__ void gemver_kernel3(int n, float alpha, const float *a, const float *
     if (i < n) {
         for (int j = 0; j < n; ++j)
             w[i] += static_cast<int>(alpha * a[i * n + j] * x[j]);
+            // w[j] += static_cast<int>(alpha * a[j * n + i] * x[i]); //Does this alteration give correct results?
     }
 }
 
@@ -216,9 +217,9 @@ int main() {
     gemver_cpu(N, alpha, beta, A, u1, v1, u2, v2, w, x, y, z);
     compareResults(N, w, w_gpu);
 #else
-    for (int i = 0; i < N; ++i)
-        std::cerr << w_gpu[i] << " ";
-    std::cerr << std::endl;
+    // for (int i = 0; i < N; ++i)
+    //     std::cerr << w_gpu[i] << " ";
+    // std::cerr << std::endl;
 #endif
 
     CHECK_CUDA(cudaFreeHost(A));

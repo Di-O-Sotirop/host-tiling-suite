@@ -4,19 +4,19 @@
 #include <cstdlib>
 #include <chrono>
 
-#define SHIFTS 20
-#define NUM_TILES 4
-#define TILE_BUFFERS 2
-#define MAX_STREAMS 2
-#define PERCENT_DIFF_ERROR_THRESHOLD 0.05
+#define SHIFTS 56
+#define MAX_STREAMS 1
+#define NUM_TILES 1
+#define TILE_BUFFERS 1
 #define GPU_DEVICE 0
+#define PERCENT_DIFF_ERROR_THRESHOLD 0.05
 // #define VERIFY 1
+#define THREADS_PER_BLOCK 256
+
 
 #ifdef VERIFY
   #define RUN_ON_CPU
 #endif
-
-#define THREADS_PER_BLOCK 256
 
 #define CHECK_CUDA(call) \
     do { \
@@ -78,16 +78,15 @@ void compareResults(int n, const float *w_cpu, const float *w_gpu) {
     int fail = 0;
     for (int i = 0; i < n; ++i) {
         float diff = std::abs(w_cpu[i] - w_gpu[i]) / std::abs(w_cpu[i]);
-        // if (diff > PERCENT_DIFF_ERROR_THRESHOLD / 100.0f) {
-        if( i < 100){
-            // fail++;
+        if (diff > PERCENT_DIFF_ERROR_THRESHOLD / 100.0f) {
+            fail++;
             std::printf("%f ~ %f\n", w_cpu[i], w_gpu[i]);
         }
     }
     std::printf("Number of mismatches: %d\n", fail);
 }
 
-void gemver(int n, float alpha, float beta, float *A, float *u1, float *v1, float *u2, float *v2, float *w, float *x, float *y, float *z) {
+void gemver_cpu(int n, float alpha, float beta, float *A, float *u1, float *v1, float *u2, float *v2, float *w, float *x, float *y, float *z) {
     for (int i = 0; i < n; ++i)
         for (int j = 0; j < n; ++j)
             A[i * n + j] += static_cast<int>(u1[i] * v1[j] + u2[i] * v2[j]);
@@ -103,15 +102,12 @@ void gemver(int n, float alpha, float beta, float *A, float *u1, float *v1, floa
             w[i] += static_cast<int>(alpha * A[i * n + j] * x[j]);
 }
 
-__global__ void gemver_kernel1_striped_custom(int n, int row_start, int row_end,
-                                              float *a_tile, const float *v1, const float *v2,
-                                              const float *u1, const float *u2, int tile_rows) {
+__global__ void gemver_kernel1(int n, float *a, const float *v1, const float *v2, const float *u1, const float *u2) {
     int j = blockIdx.x * blockDim.x + threadIdx.x;
-    int i_global = blockIdx.y * blockDim.y + threadIdx.y + row_start;
-    int i_local = (i_global - row_start) % (TILE_BUFFERS * tile_rows);
+    int i = blockIdx.y * blockDim.y + threadIdx.y;
 
-    if (i_global < row_end && j < n)
-        a_tile[i_local * n + j] += u1[i_global] * v1[j] + u2[i_global] * v2[j];
+    if ((i < n) && (j < n))
+        a[i * n + j] += u1[i] * v1[j] + u2[i] * v2[j];
 }
 
 __global__ void gemver_kernel2(int n, float beta, const float *a, float *x, const float *y, const float *z) {
@@ -128,7 +124,7 @@ __global__ void gemver_kernel3(int n, float alpha, const float *a, const float *
     if (i < n) {
         for (int j = 0; j < n; ++j)
             w[i] += static_cast<int>(alpha * a[i * n + j] * x[j]);
-            // w[j] += static_cast<int>(alpha * a[j * n + i] * x[i]);
+            // w[j] += static_cast<int>(alpha * a[j * n + i] * x[i]); //Does this alteration give correct results?
     }
 }
 
@@ -136,12 +132,12 @@ void gemverCuda(int n, float alpha, float beta,
                 float *A, float *u1, float *v1, float *u2, float *v2,
                 float *w, float *w_gpu, float *x, float *y, float *z) {
 
-    const int tile_rows = n / NUM_TILES;
-    cudaStream_t streams[MAX_STREAMS];
-
+    cudaStream_t stream;
     float *A_gpu, *x_gpu, *y_gpu, *z_gpu, *v1_gpu, *v2_gpu, *u1_gpu, *u2_gpu, *w_gpu_d;
 
-    dim3 block1(THREADS_PER_BLOCK, 1);
+    dim3 block1(THREADS_PER_BLOCK,1);
+    dim3 grid1((n + block1.x - 1) / block1.x, (n + block1.y - 1) / block1.y);
+
     dim3 blockX(THREADS_PER_BLOCK);
     dim3 gridX((n + blockX.x - 1) / blockX.x);
 
@@ -155,49 +151,32 @@ void gemverCuda(int n, float alpha, float beta,
     CHECK_CUDA(cudaMalloc(&u1_gpu, sizeof(float) * n));
     CHECK_CUDA(cudaMalloc(&u2_gpu, sizeof(float) * n));
 
-    for (int i = 0; i < MAX_STREAMS; ++i)
-        CHECK_CUDA(cudaStreamCreate(&streams[i]));
+    CHECK_CUDA(cudaStreamCreate(&stream));
 
-    CHECK_CUDA(cudaMemcpyAsync(y_gpu, y, sizeof(float) * n, cudaMemcpyHostToDevice, streams[0]));
-    CHECK_CUDA(cudaMemcpyAsync(z_gpu, z, sizeof(float) * n, cudaMemcpyHostToDevice, streams[0]));
-    CHECK_CUDA(cudaMemcpyAsync(v1_gpu, v1, sizeof(float) * n, cudaMemcpyHostToDevice, streams[0]));
-    CHECK_CUDA(cudaMemcpyAsync(v2_gpu, v2, sizeof(float) * n, cudaMemcpyHostToDevice, streams[0]));
-    CHECK_CUDA(cudaMemcpyAsync(u1_gpu, u1, sizeof(float) * n, cudaMemcpyHostToDevice, streams[0]));
-    CHECK_CUDA(cudaMemcpyAsync(u2_gpu, u2, sizeof(float) * n, cudaMemcpyHostToDevice, streams[0]));
 
-    CHECK_CUDA(cudaMemsetAsync(x_gpu, 0, sizeof(float) * n, streams[0]));
-    CHECK_CUDA(cudaMemsetAsync(w_gpu_d, 0, sizeof(float) * n, streams[0]));
+    CHECK_CUDA(cudaMemcpyAsync(y_gpu, y, sizeof(float) * n, cudaMemcpyHostToDevice, stream));
+    CHECK_CUDA(cudaMemcpyAsync(z_gpu, z, sizeof(float) * n, cudaMemcpyHostToDevice, stream));
+    CHECK_CUDA(cudaMemcpyAsync(v1_gpu, v1, sizeof(float) * n, cudaMemcpyHostToDevice, stream));
+    CHECK_CUDA(cudaMemcpyAsync(v2_gpu, v2, sizeof(float) * n, cudaMemcpyHostToDevice, stream));
+    CHECK_CUDA(cudaMemcpyAsync(u1_gpu, u1, sizeof(float) * n, cudaMemcpyHostToDevice, stream));
+    CHECK_CUDA(cudaMemcpyAsync(u2_gpu, u2, sizeof(float) * n, cudaMemcpyHostToDevice, stream));
+    CHECK_CUDA(cudaMemsetAsync(x_gpu, 0, sizeof(float) * n, stream));
+    CHECK_CUDA(cudaMemsetAsync(w_gpu_d, 0, sizeof(float) * n, stream));
 
     auto start = std::chrono::high_resolution_clock::now();
-
-    for (int t = 0; t < NUM_TILES; ++t) {
-        int stream_id = t % MAX_STREAMS;
-        int row_start = t * tile_rows;
-        int row_end = (t == NUM_TILES - 1) ? n : (t + 1) * tile_rows;
-        int num_rows = row_end - row_start;
-        int offset = row_start * n;
-        float* tile_base = A_gpu + offset;
-
-        CHECK_CUDA(cudaMemcpyAsync(tile_base, A + offset, sizeof(float) * num_rows * n, cudaMemcpyHostToDevice, streams[stream_id]));
-
-        dim3 grid1((n + block1.x - 1) / block1.x, (num_rows + block1.y - 1) / block1.y);
-
-        gemver_kernel1_striped_custom<<<grid1, block1, 0, streams[stream_id]>>>(
-            n, row_start, row_end, tile_base, v1_gpu, v2_gpu, u1_gpu, u2_gpu, tile_rows);
-    }
-
-    for (int i = 0; i < MAX_STREAMS; ++i)
-        CHECK_CUDA(cudaStreamSynchronize(streams[i]));
-
+    CHECK_CUDA(cudaMemcpyAsync(A_gpu, A, sizeof(float) * n * n, cudaMemcpyHostToDevice, stream));
+    gemver_kernel1<<<grid1, block1, 0, stream>>>(n, A_gpu, v1_gpu, v2_gpu, u1_gpu, u2_gpu);
+     CHECK_CUDA(cudaStreamSynchronize(stream));
     auto end = std::chrono::high_resolution_clock::now();
+    gemver_kernel2<<<gridX, blockX, 0, stream>>>(n, beta, A_gpu, x_gpu, y_gpu, z_gpu);
+    gemver_kernel3<<<gridX, blockX, 0, stream>>>(n, alpha, A_gpu, x_gpu, w_gpu_d);
 
-    gemver_kernel2<<<gridX, blockX>>>(n, beta, A_gpu, x_gpu, y_gpu, z_gpu);
-    gemver_kernel3<<<gridX, blockX>>>(n, alpha, A_gpu, x_gpu, w_gpu_d);
+    CHECK_CUDA(cudaMemcpyAsync(w_gpu, w_gpu_d, sizeof(float) * n, cudaMemcpyDeviceToHost, stream));
+    CHECK_CUDA(cudaStreamSynchronize(stream));
 
-    CHECK_CUDA(cudaMemcpy(w_gpu, w_gpu_d, sizeof(float) * n, cudaMemcpyDeviceToHost));
-
-    for (int i = 0; i < MAX_STREAMS; ++i)
-        CHECK_CUDA(cudaStreamDestroy(streams[i]));
+  
+    std::chrono::duration<double, std::milli> elapsed = end - start;
+    std::cout << "Execution Time: " << elapsed.count() << " ms\n";
 
     CHECK_CUDA(cudaFree(A_gpu));
     CHECK_CUDA(cudaFree(x_gpu));
@@ -208,15 +187,13 @@ void gemverCuda(int n, float alpha, float beta,
     CHECK_CUDA(cudaFree(v2_gpu));
     CHECK_CUDA(cudaFree(u1_gpu));
     CHECK_CUDA(cudaFree(u2_gpu));
-
-    std::chrono::duration<double, std::milli> elapsed = end - start;
-    std::cout << "Execution Time: " << elapsed.count() << " ms\n";
+    CHECK_CUDA(cudaStreamDestroy(stream));
 }
 
 int main() {
     warmup_cuda_runtime();
     auto start = std::chrono::high_resolution_clock::now();
-    const int N = 1 << SHIFTS;
+    const int N = 32 * SHIFTS;
 
     float alpha, beta;
     float *A;
@@ -233,15 +210,18 @@ int main() {
     float *z = (float *)malloc(N * sizeof(float));
 
     init(N, &alpha, &beta, A, u1, v1, u2, v2, w, x, y, z);
+
     gemverCuda(N, alpha, beta, A, u1, v1, u2, v2, w, w_gpu, x, y, z);
-    #ifdef RUN_ON_CPU
-        gemver(N, alpha, beta, A, u1, v1, u2, v2, w, x, y, z);
-        compareResults(N, w, w_gpu);
-    #else
-        // for (int i = 0; i < N; ++i)
-        //     std::cerr << w_gpu[i] << " ";
-        // std::cerr << std::endl;
-    #endif
+
+#ifdef RUN_ON_CPU
+    gemver_cpu(N, alpha, beta, A, u1, v1, u2, v2, w, x, y, z);
+    compareResults(N, w, w_gpu);
+#else
+    // for (int i = 0; i < N; ++i)
+    //     std::cerr << w_gpu[i] << " ";
+    // std::cerr << std::endl;
+#endif
+
     CHECK_CUDA(cudaFreeHost(A));
     free(u1); free(v1); free(u2); free(v2);
     free(w); free(w_gpu); free(x); free(y); free(z);
@@ -250,6 +230,5 @@ int main() {
         std::chrono::duration<double, std::milli> elapsed = end - start;
         std::cout << "Total Execution Time: " << elapsed.count() << " ms\n";
     #endif
-
     return 0;
 }

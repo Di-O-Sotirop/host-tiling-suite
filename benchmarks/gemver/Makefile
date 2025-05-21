@@ -3,8 +3,13 @@ NVCC := nvcc
 CFLAGS := -O3 -Xcompiler -fopenmp
 
 # Sources and executables
-BASELINE_SRC := src/gemver_AK1_tiled_baseline.cu
-TILED_SRC    := src/gemver_AK1_tiled.cu
+# BASELINE_SRC := src/gemver_AK1_tiled_baseline.cu
+# TILED_SRC    := src/gemver_AK1_tiled.cu
+
+# BASELINE_EXE := gemver_AK1_tiled_baseline.exe
+# TILED_EXE    := gemver_AK1_tiled.exe
+BASELINE_SRC := src/gemver_AK1_tiled_baseline_fine.cu
+TILED_SRC    := src/gemver_AK1_tiled_fine.cu
 
 BASELINE_EXE := gemver_AK1_tiled_baseline.exe
 TILED_EXE    := gemver_AK1_tiled.exe

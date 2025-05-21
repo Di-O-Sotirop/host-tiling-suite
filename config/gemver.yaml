@@ -5,17 +5,17 @@ executable:
   tiled: gemver_AK1_tiled.exe
 
 source:
-  baseline: gemver_AK1_tiled_baseline.cu
-  tiled: gemver_AK1_tiled.cu
+  baseline: gemver_AK1_tiled_baseline_fine.cu
+  tiled: gemver_AK1_tiled_fine.cu
 
 make_targets:
   baseline: gemver_AK1_tiled_baseline.exe
   tiled: gemver_AK1_tiled.exe
 
 parameters:
-  shifts: [6, 8, 10, 12]
+  shifts: [16,24,32,40,48,56,64,72,80,88,96,104,112,120,128] #[5, 6, 8, 10, 12, 13]
   num_tiles: [1, 2, 4, 8, 16, 32]
-  repeats: 15
+  repeats: 100
   threads_per_block: 256
   verify: true
   debug: true 

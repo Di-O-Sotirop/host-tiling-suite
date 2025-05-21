@@ -4,8 +4,8 @@
 #include <cstdlib>
 #include <chrono>
 
-#define SHIFTS 20
-#define NUM_TILES 4
+#define SHIFTS 56
+#define NUM_TILES 1
 #define TILE_BUFFERS 2
 #define MAX_STREAMS 2
 #define PERCENT_DIFF_ERROR_THRESHOLD 0.05
@@ -78,9 +78,9 @@ void compareResults(int n, const float *w_cpu, const float *w_gpu) {
     int fail = 0;
     for (int i = 0; i < n; ++i) {
         float diff = std::abs(w_cpu[i] - w_gpu[i]) / std::abs(w_cpu[i]);
-        // if (diff > PERCENT_DIFF_ERROR_THRESHOLD / 100.0f) {
-        if( i < 100){
-            // fail++;
+        if (diff > PERCENT_DIFF_ERROR_THRESHOLD / 100.0f) {
+        // if( i < 100){
+            fail++;
             std::printf("%f ~ %f\n", w_cpu[i], w_gpu[i]);
         }
     }
@@ -216,7 +216,7 @@ void gemverCuda(int n, float alpha, float beta,
 int main() {
     warmup_cuda_runtime();
     auto start = std::chrono::high_resolution_clock::now();
-    const int N = 1 << SHIFTS;
+    const int N = 32 * SHIFTS;
 
     float alpha, beta;
     float *A;

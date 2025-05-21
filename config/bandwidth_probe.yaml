@@ -1,0 +1,9 @@
+benchmark_name: bandwidth_probe
+
+parameters:
+  min_size_kb: 1            # Start size in KB (e.g., 1 KB)
+  max_size_mb: 512         # Max size in MB (e.g., 256 MB)
+  tolerance: 0.05           # Relative tolerance to define saturation (5%)
+  repeats: 100               # Number of repetitions per size
+  mode: H2D                 # H2D (Host to Device) or D2H (Device to Host)
+  debug: false              # Print detailed per-run information
